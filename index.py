@@ -3,8 +3,12 @@ import os
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 
+import folium
+from folium.plugins import MeasureControl
 import geopandas as gpd
 import pandas as pd
+from branca.colormap import LinearColormap
+from matplotlib import colors
 from matplotlib.colors import LinearSegmentedColormap
 
 
@@ -69,21 +73,33 @@ def main() -> None:
     print(f"Merged {len(merged)} features into {OUTPUT_GPKG}::{OUTPUT_LAYER}")
     print(f"Merged fields: {', '.join(merged.columns)}")
 
-    tot_score_values = pd.to_numeric(merged["tot_score"], errors="coerce")
+    map_gdf = merged.copy()
+    tot_score_values = pd.to_numeric(map_gdf["tot_score"], errors="coerce")
+    tot_score_min = tot_score_values.min()
+    tot_score_max = tot_score_values.max()
     tot_score_cmap = LinearSegmentedColormap.from_list(
         "tot_score_light_gray_to_hot_pink",
         ["#d9d9d9", "#ff1493"],
     )
-    map_html = merged.explore(
-        column="tot_score",
-        cmap=tot_score_cmap,
-        vmin=tot_score_values.min(),
-        vmax=tot_score_values.max(),
+
+    def tot_score_color(value: float) -> str:
+        if pd.isna(value):
+            return "#777777"
+        if tot_score_max == tot_score_min:
+            return colors.to_hex(tot_score_cmap(1))
+        normalized = (value - tot_score_min) / (tot_score_max - tot_score_min)
+        return colors.to_hex(tot_score_cmap(normalized))
+
+    map_gdf["tot_score_color"] = tot_score_values.map(tot_score_color)
+    display_columns = list(merged.columns.drop(merged.geometry.name))
+    map_html = map_gdf.explore(
+        name="Merged Soft Sites",
+        color="tot_score_color",
         tiles=GOOGLE_SATELLITE_TILES,
         attr=GOOGLE_ATTRIBUTION,
-        legend=True,
-        tooltip=list(merged.columns.drop(merged.geometry.name)),
-        popup=True,
+        legend=False,
+        tooltip=display_columns,
+        popup=display_columns,
         style_kwds={
             "fillOpacity": 0.65,
             "color": "#333333",
@@ -96,6 +112,20 @@ def main() -> None:
             "label": "Missing tot_score",
         },
     )
+    LinearColormap(
+        colors=["#d9d9d9", "#ff1493"],
+        vmin=tot_score_min,
+        vmax=tot_score_max,
+        caption="tot_score",
+    ).add_to(map_html)
+    MeasureControl(
+        position="topright",
+        primary_length_unit="feet",
+        secondary_length_unit="miles",
+        primary_area_unit="sqfeet",
+        secondary_area_unit="acres",
+    ).add_to(map_html)
+    folium.LayerControl(collapsed=False).add_to(map_html)
     map_html.save(OUTPUT_HTML)
     print(f"Saved map to {OUTPUT_HTML}")
 
