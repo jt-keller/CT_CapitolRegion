@@ -37,6 +37,173 @@ BASE_OUTPUT_COLUMNS = [
 ]
 
 
+def add_side_panel(html_path: Path) -> None:
+    side_panel_markup = """
+    <style>
+      #softsite-info-panel {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 25%;
+        height: 100%;
+        z-index: 9999;
+        box-sizing: border-box;
+        overflow: auto;
+        background: #ffffff;
+        border-right: 1px solid #d4d4d4;
+        color: #1f2933;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      #softsite-info-panel .panel-header {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        padding: 12px 14px;
+        border-bottom: 1px solid #d4d4d4;
+        background: #f7f7f7;
+      }
+
+      #softsite-info-panel h2 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 700;
+      }
+
+      #softsite-info-panel .panel-subtitle {
+        margin-top: 4px;
+        font-size: 12px;
+        color: #5b6570;
+      }
+
+      #softsite-info-panel table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 12px;
+      }
+
+      #softsite-info-panel th,
+      #softsite-info-panel td {
+        padding: 7px 10px;
+        border-bottom: 1px solid #ececec;
+        text-align: left;
+        vertical-align: top;
+        word-break: break-word;
+      }
+
+      #softsite-info-panel th {
+        width: 42%;
+        color: #4b5563;
+        font-weight: 700;
+        background: #fbfbfb;
+      }
+
+      #softsite-info-empty {
+        padding: 14px;
+        font-size: 13px;
+        color: #5b6570;
+      }
+
+      .folium-map {
+        left: 25% !important;
+        width: 75% !important;
+      }
+
+      @media (max-width: 800px) {
+        #softsite-info-panel {
+          width: 35%;
+        }
+
+        .folium-map {
+          left: 35% !important;
+          width: 65% !important;
+        }
+      }
+    </style>
+    <div id="softsite-info-panel">
+      <div class="panel-header">
+        <h2>Parcel Details</h2>
+        <div class="panel-subtitle">Hover or click a parcel</div>
+      </div>
+      <div id="softsite-info-empty">No parcel selected.</div>
+      <table id="softsite-info-table" style="display: none;">
+        <tbody></tbody>
+      </table>
+    </div>
+    <script>
+      (function () {
+        const hiddenFields = new Set(["tot_score_color"]);
+        const table = document.querySelector("#softsite-info-table");
+        const tbody = table.querySelector("tbody");
+        const empty = document.querySelector("#softsite-info-empty");
+
+        function formatValue(value) {
+          if (value === null || value === undefined || value === "") {
+            return "";
+          }
+          if (typeof value === "number") {
+            return Number.isInteger(value) ? value.toLocaleString() : value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+          }
+          return String(value);
+        }
+
+        function showProperties(properties) {
+          tbody.innerHTML = "";
+          Object.entries(properties)
+            .filter(([key]) => !hiddenFields.has(key))
+            .forEach(([key, value]) => {
+              const row = document.createElement("tr");
+              const label = document.createElement("th");
+              const cell = document.createElement("td");
+              label.textContent = key;
+              cell.textContent = formatValue(value);
+              row.append(label, cell);
+              tbody.appendChild(row);
+            });
+          empty.style.display = "none";
+          table.style.display = "table";
+        }
+
+        function wireLayer(layer) {
+          if (layer.feature && layer.feature.properties && layer.on) {
+            layer.on({
+              mouseover: function () {
+                showProperties(layer.feature.properties);
+              },
+              click: function () {
+                showProperties(layer.feature.properties);
+              }
+            });
+          }
+
+          if (layer.eachLayer) {
+            layer.eachLayer(wireLayer);
+          }
+        }
+
+        function findMaps() {
+          return Array.from(document.querySelectorAll(".folium-map"))
+            .map((element) => window[element.id])
+            .filter((value) => value instanceof L.Map);
+        }
+
+        window.addEventListener("load", function () {
+          findMaps().forEach((map) => {
+            map.eachLayer(wireLayer);
+            setTimeout(function () {
+              map.invalidateSize();
+            }, 100);
+          });
+        });
+      })();
+    </script>
+    """
+
+    html = html_path.read_text()
+    html = html.replace("</body>", f"{side_panel_markup}\n</body>")
+    html_path.write_text(html)
+
+
 def read_single_layer(gpkg_path: Path) -> gpd.GeoDataFrame:
     layers = gpd.list_layers(gpkg_path)
 
@@ -98,8 +265,8 @@ def main() -> None:
         tiles=GOOGLE_SATELLITE_TILES,
         attr=GOOGLE_ATTRIBUTION,
         legend=False,
-        tooltip=display_columns,
-        popup=display_columns,
+        tooltip=False,
+        popup=False,
         style_kwds={
             "fillOpacity": 0.65,
             "color": "#333333",
@@ -127,6 +294,7 @@ def main() -> None:
     ).add_to(map_html)
     folium.LayerControl(collapsed=False).add_to(map_html)
     map_html.save(OUTPUT_HTML)
+    add_side_panel(OUTPUT_HTML)
     print(f"Saved map to {OUTPUT_HTML}")
 
 
