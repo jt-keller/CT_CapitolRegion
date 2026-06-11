@@ -4,7 +4,7 @@ import os
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 
 import folium
-from folium.plugins import MeasureControl
+from folium.plugins import Geocoder, MeasureControl
 import geopandas as gpd
 import pandas as pd
 from branca.colormap import LinearColormap
@@ -136,6 +136,7 @@ def add_side_panel(html_path: Path) -> None:
         const table = document.querySelector("#softsite-info-table");
         const tbody = table.querySelector("tbody");
         const empty = document.querySelector("#softsite-info-empty");
+        let selectedLayer = null;
 
         function formatValue(value) {
           if (value === null || value === undefined || value === "") {
@@ -164,14 +165,49 @@ def add_side_panel(html_path: Path) -> None:
           table.style.display = "table";
         }
 
+        function captureOriginalStyle(layer) {
+          if (!layer._softsiteOriginalStyle) {
+            layer._softsiteOriginalStyle = {
+              color: layer.options.color,
+              fillColor: layer.options.fillColor,
+              fillOpacity: layer.options.fillOpacity,
+              opacity: layer.options.opacity,
+              weight: layer.options.weight
+            };
+          }
+        }
+
+        function selectLayer(layer) {
+          if (!layer.setStyle) {
+            return;
+          }
+          captureOriginalStyle(layer);
+          if (selectedLayer && selectedLayer !== layer && selectedLayer.setStyle) {
+            selectedLayer.setStyle(selectedLayer._softsiteOriginalStyle);
+          }
+          selectedLayer = layer;
+          selectedLayer.setStyle({
+            color: "#005fcc",
+            fillColor: "#1e88ff",
+            fillOpacity: 0.35,
+            opacity: 0.9,
+            weight: 2
+          });
+          if (selectedLayer.bringToFront) {
+            selectedLayer.bringToFront();
+          }
+        }
+
         function wireLayer(layer) {
           if (layer.feature && layer.feature.properties && layer.on) {
+            captureOriginalStyle(layer);
             layer.on({
               mouseover: function () {
                 showProperties(layer.feature.properties);
               },
               click: function () {
                 showProperties(layer.feature.properties);
+                selectLayer(layer);
               }
             });
           }
@@ -232,6 +268,10 @@ def main() -> None:
         geometry=aligned_frames[0].geometry.name,
         crs=target_crs,
     )
+    public_amenity = pd.to_numeric(merged["publicAmenity"], errors="coerce").fillna(0)
+    public_amenity_count = int((public_amenity == 1).sum())
+    merged = merged[public_amenity != 1].copy()
+    print(f"Filtered out {public_amenity_count} publicAmenity=1 features")
     score_columns = [column for column in merged.columns if column.endswith("_score")]
     output_columns = BASE_OUTPUT_COLUMNS + score_columns + [merged.geometry.name]
     merged = merged[output_columns]
@@ -265,6 +305,7 @@ def main() -> None:
         tiles=GOOGLE_SATELLITE_TILES,
         attr=GOOGLE_ATTRIBUTION,
         legend=False,
+        highlight=False,
         tooltip=False,
         popup=False,
         style_kwds={
@@ -291,6 +332,12 @@ def main() -> None:
         secondary_length_unit="miles",
         primary_area_unit="sqfeet",
         secondary_area_unit="acres",
+    ).add_to(map_html)
+    Geocoder(
+        collapsed=False,
+        position="topright",
+        add_marker=True,
+        zoom=17,
     ).add_to(map_html)
     folium.LayerControl(collapsed=False).add_to(map_html)
     map_html.save(OUTPUT_HTML)
